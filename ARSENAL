@@ -1,0 +1,1035 @@
+--!strict
+-- ============================================================
+--  ARGON : Translucent Glass Edition (Midnight macOS UI)
+--  Roblox API ล้วนๆ ไม่ต้องโหลด Library ภายนอก
+--  อนิเมชันเปิด/ปิด Smooth + ตั้งปุ่ม Keybind เองได้อิสระ
+-- ============================================================
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local lp = Players.LocalPlayer
+
+-- ===== THEME (Translucent Glassmorphism & Crystal Cyan) =====
+local C = {
+	win    = Color3.fromRGB(11, 17, 32),
+	side   = Color3.fromRGB(8, 12, 24),
+	panel  = Color3.fromRGB(18, 28, 48),
+	row    = Color3.fromRGB(24, 36, 62),
+	line   = Color3.fromRGB(0, 229, 255),
+	text   = Color3.fromRGB(240, 249, 255),
+	muted  = Color3.fromRGB(148, 163, 184),
+	accent = Color3.fromRGB(0, 229, 255),
+	off    = Color3.fromRGB(45, 55, 75),
+}
+local FONT = Enum.Font.Gotham
+local FONT_MED = Enum.Font.GothamMedium
+local FONT_BOLD = Enum.Font.GothamBold
+local TWEEN = TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local TWEEN_FAST = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+-- ===== CONFIGURATION =====
+local CFG = {
+	menuKey        = Enum.KeyCode.RightControl,
+
+	espEnabled     = true,
+	showBoxes      = true,
+	showTracers    = true,
+	showNames      = true,
+	showHealth     = true,
+	showDistance   = true,
+	teamCheck      = true,
+	maxDist        = 250,
+
+	enemyColor     = Color3.fromRGB(0, 229, 255),
+	teamColor      = Color3.fromRGB(56, 189, 248),
+	tracerColor    = Color3.fromRGB(0, 180, 255),
+	fovColor       = Color3.fromRGB(0, 240, 255),
+
+	aimlockEnabled = true,
+	aimlockKey     = Enum.UserInputType.MouseButton2,
+	aimPart        = "Head",
+	aimSmoothing   = 0.15,
+	fovRadius      = 140,
+	showFOV        = true,
+}
+
+local function getKeyDisplayName(k: any): string
+	if typeof(k) == "EnumItem" then
+		if k.EnumType == Enum.KeyCode then
+			return k.Name
+		elseif k.EnumType == Enum.UserInputType then
+			if k == Enum.UserInputType.MouseButton1 then return "Left Click"
+			elseif k == Enum.UserInputType.MouseButton2 then return "Right Click"
+			elseif k == Enum.UserInputType.MouseButton3 then return "Middle Click"
+			end
+			return k.Name
+		end
+	end
+	return tostring(k)
+end
+
+-- ===== HELPERS =====
+local function make(class: string, props: {[string]: any}, parent: Instance?): any
+	local inst = Instance.new(class)
+	for k, v in pairs(props) do
+		(inst :: any)[k] = v
+	end
+	inst.Parent = parent
+	return inst
+end
+
+local function corner(inst: Instance, r: number)
+	make("UICorner", { CornerRadius = UDim.new(0, r) }, inst)
+end
+
+local function stroke(inst: Instance, color: Color3, thickness: number?, trans: number?)
+	return make("UIStroke", {
+		Color = color,
+		Thickness = thickness or 1,
+		Transparency = trans or 0.7,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	}, inst)
+end
+
+local function label(parent: Instance, text: string, size: number, color: Color3, font: Enum.Font?, props: {[string]: any}?): TextLabel
+	local p = {
+		BackgroundTransparency = 1,
+		Text = text,
+		TextSize = size,
+		TextColor3 = color,
+		Font = font or FONT,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}
+	if props then
+		for k, v in pairs(props) do p[k] = v end
+	end
+	return make("TextLabel", p, parent)
+end
+
+local function isPress(input: InputObject): boolean
+	return input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch
+end
+
+-- ===== GUI CONTAINER =====
+local targetParent = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or lp:WaitForChild("PlayerGui")
+
+local gui = make("ScreenGui", {
+	Name = "MidnightUI",
+	ResetOnSpawn = false,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	IgnoreGuiInset = true,
+}, targetParent)
+
+-- Window Frame with Glass Transparency
+local window = make("Frame", {
+	Name = "Window",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(820, 520),
+	BackgroundColor3 = C.win,
+	BackgroundTransparency = 0.15,
+	BorderSizePixel = 0,
+	ClipsDescendants = true,
+}, gui)
+corner(window, 14)
+stroke(window, C.accent, 1.2, 0.5)
+
+local windowScale = make("UIScale", {
+	Scale = 1,
+}, window)
+
+local sidebar = make("Frame", {
+	Size = UDim2.new(0, 210, 1, 0),
+	BackgroundColor3 = C.side,
+	BackgroundTransparency = 0.25,
+	BorderSizePixel = 0,
+}, window)
+
+make("Frame", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.fromScale(1, 0),
+	Size = UDim2.new(0, 1, 1, 0),
+	BackgroundColor3 = C.accent,
+	BackgroundTransparency = 0.8,
+	BorderSizePixel = 0,
+}, sidebar)
+
+-- Top Left macOS Traffic Lights
+local lights = make("Frame", {
+	Position = UDim2.fromOffset(16, 14),
+	Size = UDim2.fromOffset(60, 14),
+	BackgroundTransparency = 1,
+}, sidebar)
+make("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	Padding = UDim.new(0, 8),
+}, lights)
+local lightColors = {
+	Color3.fromRGB(255, 95, 87),
+	Color3.fromRGB(254, 188, 46),
+	Color3.fromRGB(40, 200, 64),
+}
+
+-- ANIMATED MENU TOGGLE
+local isMenuOpen = true
+local isAnimating = false
+
+local function toggleMenu(open: boolean?)
+	if isAnimating then return end
+	isAnimating = true
+	if open == nil then open = not isMenuOpen end
+	isMenuOpen = open
+
+	if isMenuOpen then
+		window.Visible = true
+		windowScale.Scale = 0.82
+		window.BackgroundTransparency = 0.8
+		TweenService:Create(windowScale, TWEEN, { Scale = 1 }):Play()
+		local t = TweenService:Create(window, TWEEN_FAST, { BackgroundTransparency = 0.15 })
+		t:Play()
+		t.Completed:Connect(function() isAnimating = false end)
+	else
+		TweenService:Create(windowScale, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0.85 }):Play()
+		local t = TweenService:Create(window, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { BackgroundTransparency = 1 })
+		t:Play()
+		t.Completed:Connect(function()
+			window.Visible = false
+			isAnimating = false
+		end)
+	end
+end
+
+for i, col in ipairs(lightColors) do
+	local b = make("TextButton", {
+		Size = UDim2.fromOffset(12, 12),
+		BackgroundColor3 = col,
+		Text = "",
+		AutoButtonColor = false,
+		LayoutOrder = i,
+	}, lights)
+	corner(b, 6)
+	if i == 1 then
+		b.MouseButton1Click:Connect(function()
+			toggleMenu(false)
+		end)
+	end
+end
+
+-- Brand Header in Sidebar
+local brandBox = make("Frame", {
+	Position = UDim2.fromOffset(0, 36),
+	Size = UDim2.new(1, 0, 0, 32),
+	BackgroundTransparency = 1,
+}, sidebar)
+make("UIPadding", { PaddingLeft = UDim.new(0, 16) }, brandBox)
+
+label(brandBox, "ARGON", 16, C.accent, FONT_BOLD, {
+	Size = UDim2.new(1, 0, 1, 0),
+})
+
+local navList = make("ScrollingFrame", {
+	Position = UDim2.fromOffset(0, 72),
+	Size = UDim2.new(1, 0, 1, -72),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ScrollBarThickness = 0,
+	CanvasSize = UDim2.new(),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, sidebar)
+make("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }, navList)
+make("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, navList)
+
+local topbar = make("Frame", {
+	Position = UDim2.fromOffset(210, 0),
+	Size = UDim2.new(1, -210, 0, 52),
+	BackgroundTransparency = 1,
+}, window)
+make("Frame", {
+	AnchorPoint = Vector2.new(0, 1),
+	Position = UDim2.fromScale(0, 1),
+	Size = UDim2.new(1, 0, 0, 1),
+	BackgroundColor3 = C.accent,
+	BackgroundTransparency = 0.85,
+	BorderSizePixel = 0,
+}, topbar)
+local titleLabel = label(topbar, "ARGON", 15, C.text, FONT_BOLD, {
+	Position = UDim2.fromOffset(18, 8), Size = UDim2.new(1, -36, 0, 20),
+})
+local subtitleLabel = label(topbar, "Crystal Cyan Combat Suite", 11, C.muted, FONT, {
+	Position = UDim2.fromOffset(18, 28), Size = UDim2.new(1, -36, 0, 16),
+})
+
+local content = make("Frame", {
+	Position = UDim2.fromOffset(210, 52),
+	Size = UDim2.new(1, -210, 1, -52),
+	BackgroundTransparency = 1,
+}, window)
+
+-- Dragging
+do
+	local dragging, dragStart, startPos = false, Vector2.zero, UDim2.new()
+	topbar.InputBegan:Connect(function(input)
+		if isPress(input) then
+			dragging = true
+			dragStart = Vector2.new(input.Position.X, input.Position.Y)
+			startPos = window.Position
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			local d = Vector2.new(input.Position.X, input.Position.Y) - dragStart
+			window.Position = UDim2.new(
+				startPos.X.Scale, startPos.X.Offset + d.X,
+				startPos.Y.Scale, startPos.Y.Offset + d.Y
+			)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if isPress(input) then dragging = false end
+	end)
+end
+
+-- Custom Global Key Listener for Menu Toggle
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	local isMatch = false
+	if CFG.menuKey.EnumType == Enum.KeyCode and input.KeyCode == CFG.menuKey then
+		isMatch = true
+	elseif CFG.menuKey.EnumType == Enum.UserInputType and input.UserInputType == CFG.menuKey then
+		isMatch = true
+	end
+	if isMatch then
+		toggleMenu()
+	end
+end)
+
+-- ===== TABS & SECTIONS =====
+local tabs = {}
+local groupOrder = 0
+
+local function selectTab(tab)
+	for _, t in ipairs(tabs) do
+		local active = (t == tab)
+		t.page.Visible = active
+		TweenService:Create(t.button, TWEEN_FAST, {
+			BackgroundTransparency = active and 0.15 or 1,
+		}):Play()
+		t.icon.TextColor3 = active and Color3.new(1, 1, 1) or C.accent
+	end
+	titleLabel.Text = tab.name
+	subtitleLabel.Text = tab.subtitle
+end
+
+local function addGroup(name: string)
+	groupOrder += 1
+	label(navList, name, 10, C.muted, FONT_BOLD, {
+		Size = UDim2.new(1, 0, 0, 22),
+		LayoutOrder = groupOrder * 100,
+		TextYAlignment = Enum.TextYAlignment.Bottom,
+	})
+	return groupOrder
+end
+
+local function makeSection(page: ScrollingFrame, title: string, subtitle: string)
+	local holder = make("Frame", {
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		LayoutOrder = #page:GetChildren(),
+	}, page)
+	make("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, holder)
+	make("UIPadding", { PaddingBottom = UDim.new(0, 14) }, holder)
+	label(holder, title, 13, C.text, FONT_BOLD, { Size = UDim2.new(1, 0, 0, 18), LayoutOrder = 1 })
+	label(holder, subtitle, 12, C.muted, FONT, { Size = UDim2.new(1, 0, 0, 16), LayoutOrder = 2 })
+
+	local card = make("Frame", {
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = C.panel,
+		BackgroundTransparency = 0.25,
+		BorderSizePixel = 0,
+		LayoutOrder = 3,
+	}, holder)
+	corner(card, 10)
+	stroke(card, C.accent, 1, 0.8)
+	make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, card)
+
+	local count = 0
+	local section = {}
+
+	local function newRow(titleText: string, desc: string?)
+		count += 1
+		local r = make("Frame", {
+			Size = UDim2.new(1, 0, 0, desc and 54 or 44),
+			BackgroundTransparency = 1,
+			LayoutOrder = count,
+		}, card)
+		if count > 1 then
+			make("Frame", {
+				Size = UDim2.new(1, 0, 0, 1),
+				BackgroundColor3 = C.accent,
+				BackgroundTransparency = 0.88,
+				BorderSizePixel = 0,
+			}, r)
+		end
+		label(r, titleText, 13, C.text, FONT_MED, {
+			Position = UDim2.fromOffset(14, desc and 9 or 13),
+			Size = UDim2.new(1, -220, 0, 16),
+		})
+		if desc then
+			label(r, desc, 12, C.muted, FONT, {
+				Position = UDim2.fromOffset(14, 27),
+				Size = UDim2.new(1, -220, 0, 16),
+			})
+		end
+		local ctl = make("Frame", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -14, 0.5, 0),
+			Size = UDim2.fromOffset(210, 28),
+			BackgroundTransparency = 1,
+		}, r)
+		return ctl
+	end
+
+	-- TOGGLE SWITCH
+	function section:Toggle(name: string, desc: string?, default: boolean, callback: ((boolean) -> ())?)
+		local ctl = newRow(name, desc)
+		local state = default
+		local track = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.fromScale(1, 0.5),
+			Size = UDim2.fromOffset(38, 22),
+			BackgroundColor3 = state and C.accent or C.off,
+			BackgroundTransparency = 0.1,
+			Text = "",
+			AutoButtonColor = false,
+		}, ctl)
+		corner(track, 11)
+		local knob = make("Frame", {
+			Position = state and UDim2.fromOffset(18, 2) or UDim2.fromOffset(2, 2),
+			Size = UDim2.fromOffset(18, 18),
+			BackgroundColor3 = Color3.new(1, 1, 1),
+			BorderSizePixel = 0,
+		}, track)
+		corner(knob, 9)
+		track.MouseButton1Click:Connect(function()
+			state = not state
+			TweenService:Create(track, TWEEN_FAST, { BackgroundColor3 = state and C.accent or C.off }):Play()
+			TweenService:Create(knob, TWEEN_FAST, {
+				Position = state and UDim2.fromOffset(18, 2) or UDim2.fromOffset(2, 2),
+			}):Play()
+			if callback then callback(state) end
+		end)
+	end
+
+	-- SLIDER
+	function section:Slider(name: string, desc: string?, default: number, min: number, max: number, suffix: string?, callback: ((number) -> ())?)
+		local ctl = newRow(name, desc)
+		local value = default
+		local suff = suffix or ""
+		local valueLabel = label(ctl, tostring(value) .. suff, 12, C.muted, FONT, {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.fromScale(1, 0.5),
+			Size = UDim2.fromOffset(48, 16),
+			TextXAlignment = Enum.TextXAlignment.Right,
+		})
+		local hit = make("Frame", {
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0, 0, 0.5, 0),
+			Size = UDim2.new(1, -54, 0, 24),
+			BackgroundTransparency = 1,
+			Active = true,
+		}, ctl)
+		local bar = make("Frame", {
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.fromScale(0, 0.5),
+			Size = UDim2.new(1, 0, 0, 4),
+			BackgroundColor3 = C.off,
+			BorderSizePixel = 0,
+		}, hit)
+		corner(bar, 2)
+		local fill = make("Frame", {
+			Size = UDim2.fromScale(0, 1),
+			BackgroundColor3 = C.accent,
+			BorderSizePixel = 0,
+		}, bar)
+		corner(fill, 2)
+		local knob = make("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0, 0.5),
+			Size = UDim2.fromOffset(16, 16),
+			BackgroundColor3 = Color3.new(1, 1, 1),
+			BorderSizePixel = 0,
+		}, bar)
+		corner(knob, 8)
+
+		local function render()
+			local a = math.clamp((value - min) / (max - min), 0, 1)
+			fill.Size = UDim2.fromScale(a, 1)
+			knob.Position = UDim2.fromScale(a, 0.5)
+			valueLabel.Text = tostring(value) .. suff
+		end
+		local function setFromX(x: number)
+			local a = math.clamp((x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+			local v = math.floor(min + a * (max - min) + 0.5)
+			if v ~= value then
+				value = v
+				if callback then callback(value) end
+			end
+			render()
+		end
+		render()
+
+		local dragging = false
+		hit.InputBegan:Connect(function(input)
+			if isPress(input) then
+				dragging = true
+				setFromX(input.Position.X)
+			end
+		end)
+		UserInputService.InputChanged:Connect(function(input)
+			if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch) then
+				setFromX(input.Position.X)
+			end
+		end)
+		UserInputService.InputEnded:Connect(function(input)
+			if isPress(input) then dragging = false end
+		end)
+	end
+
+	-- CUSTOM DYNAMIC KEYBIND PICKER
+	function section:Keybind(name: string, desc: string?, defaultKey: any, callback: ((any) -> ())?)
+		local ctl = newRow(name, desc)
+		local currentKey = defaultKey
+		local isListening = false
+
+		local btn = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.fromScale(1, 0.5),
+			Size = UDim2.fromOffset(130, 26),
+			BackgroundColor3 = C.row,
+			BackgroundTransparency = 0.2,
+			Text = "[ " .. getKeyDisplayName(currentKey) .. " ]",
+			TextColor3 = C.accent,
+			TextSize = 12,
+			Font = FONT_BOLD,
+			AutoButtonColor = true,
+		}, ctl)
+		corner(btn, 7)
+		local btnStroke = stroke(btn, C.accent, 1, 0.7)
+
+		btn.MouseButton1Click:Connect(function()
+			if isListening then return end
+			isListening = true
+			btn.Text = "[ Press Any Key... ]"
+			btn.TextColor3 = Color3.fromRGB(255, 220, 80)
+			btnStroke.Transparency = 0.1
+			btnStroke.Color = Color3.fromRGB(255, 220, 80)
+
+			local conn: RBXScriptConnection
+			conn = UserInputService.InputBegan:Connect(function(inp, gpe)
+				if inp.UserInputType == Enum.UserInputType.MouseMovement then return end
+				local selected = nil
+
+				if inp.UserInputType == Enum.UserInputType.Keyboard and inp.KeyCode ~= Enum.KeyCode.Unknown then
+					selected = inp.KeyCode
+				elseif inp.UserInputType == Enum.UserInputType.MouseButton1
+					or inp.UserInputType == Enum.UserInputType.MouseButton2
+					or inp.UserInputType == Enum.UserInputType.MouseButton3 then
+					selected = inp.UserInputType
+				end
+
+				if selected then
+					conn:Disconnect()
+					currentKey = selected
+					btn.Text = "[ " .. getKeyDisplayName(currentKey) .. " ]"
+					btn.TextColor3 = C.accent
+					btnStroke.Transparency = 0.7
+					btnStroke.Color = C.accent
+					isListening = false
+					if callback then callback(currentKey) end
+				end
+			end)
+		end)
+	end
+
+	-- DROPDOWN CYCLER
+	function section:Dropdown(name: string, desc: string?, options: {string}, defaultIndex: number?, callback: ((string) -> ())?)
+		local ctl = newRow(name, desc)
+		local index = defaultIndex or 1
+		local btn = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.fromScale(1, 0.5),
+			Size = UDim2.fromOffset(130, 26),
+			BackgroundColor3 = C.row,
+			BackgroundTransparency = 0.2,
+			Text = options[index] .. "  ⌄",
+			TextColor3 = C.text,
+			TextSize = 12,
+			Font = FONT_MED,
+			AutoButtonColor = true,
+		}, ctl)
+		corner(btn, 7)
+		stroke(btn, C.accent, 1, 0.8)
+		btn.MouseButton1Click:Connect(function()
+			index = index % #options + 1
+			btn.Text = options[index] .. "  ⌄"
+			if callback then callback(options[index]) end
+		end)
+	end
+
+	-- ACTION BUTTON
+	function section:Button(name: string, desc: string?, buttonText: string, callback: (() -> ())?)
+		local ctl = newRow(name, desc)
+		local btn = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.fromScale(1, 0.5),
+			Size = UDim2.fromOffset(110, 26),
+			BackgroundColor3 = C.accent,
+			BackgroundTransparency = 0.1,
+			Text = buttonText,
+			TextColor3 = Color3.fromRGB(8, 12, 24),
+			TextSize = 12,
+			Font = FONT_BOLD,
+		}, ctl)
+		corner(btn, 7)
+		btn.MouseButton1Click:Connect(function()
+			if callback then callback() end
+		end)
+	end
+
+	return section
+end
+
+local function addTab(groupId: number, name: string, subtitle: string, iconGlyph: string)
+	local index = 0
+	for _, t in ipairs(tabs) do
+		if t.group == groupId then index += 1 end
+	end
+
+	local button = make("TextButton", {
+		Size = UDim2.new(1, 0, 0, 30),
+		BackgroundColor3 = C.accent,
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+		LayoutOrder = groupId * 100 + index + 1,
+	}, navList)
+	corner(button, 7)
+	local icon = label(button, iconGlyph, 14, C.accent, FONT_BOLD, {
+		Position = UDim2.fromOffset(8, 0),
+		Size = UDim2.fromOffset(20, 30),
+		TextXAlignment = Enum.TextXAlignment.Center,
+	})
+	label(button, name, 13, C.text, FONT_MED, {
+		Position = UDim2.fromOffset(34, 0),
+		Size = UDim2.new(1, -40, 1, 0),
+	})
+
+	local page = make("ScrollingFrame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 4,
+		ScrollBarImageColor3 = C.accent,
+		ScrollBarImageTransparency = 0.6,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		Visible = false,
+	}, content)
+	make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6) }, page)
+	make("UIPadding", {
+		PaddingTop = UDim.new(0, 16), PaddingBottom = UDim.new(0, 16),
+		PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 20),
+	}, page)
+
+	local tab = { name = name, subtitle = subtitle, button = button, icon = icon, page = page, group = groupId }
+	table.insert(tabs, tab)
+	button.MouseButton1Click:Connect(function() selectTab(tab) end)
+
+	function tab:Section(title: string, sub: string)
+		return makeSection(page, title, sub)
+	end
+	return tab
+end
+
+-- ============================================================
+--  MENUS & FEATURES SETUP
+-- ============================================================
+local gCombat   = addGroup("Combat")
+local tabAim    = addTab(gCombat, "Aimlock", "Precision targeting & FOV", "🎯")
+
+local gVisuals  = addGroup("Visuals")
+local tabESP    = addTab(gVisuals, "Player ESP", "Wallhack & tracer visuals", "👁")
+local tabColors = addTab(gVisuals, "Themes & Colors", "Color customization", "🎨")
+
+local gSystem   = addGroup("System")
+local tabConfig = addTab(gSystem, "Settings", "Menu shortcuts & controls", "⚙")
+
+-- === [1] AIMLOCK TAB ===
+local sAim1 = tabAim:Section("Aimlock Assist", "Automatically track and lock onto enemy targets.")
+sAim1:Toggle("Enable Aimlock", "Master switch for aim assistance.", CFG.aimlockEnabled, function(on)
+	CFG.aimlockEnabled = on
+end)
+sAim1:Toggle("Show FOV Circle", "Draw field-of-view targeting radius on screen.", CFG.showFOV, function(on)
+	CFG.showFOV = on
+end)
+sAim1:Keybind("Aimlock Key", "Click to press any key or mouse button to bind.", CFG.aimlockKey, function(newKey)
+	CFG.aimlockKey = newKey
+end)
+sAim1:Dropdown("Target Hitbox", "Body part to lock onto.", {
+	"Head", "HumanoidRootPart", "UpperTorso"
+}, 1, function(sel)
+	CFG.aimPart = sel
+end)
+
+local sAim2 = tabAim:Section("Tuning & Radius", "Adjust smoothness and target lock distance.")
+sAim2:Slider("Aim Smoothing", "Interpolation speed (lower = faster, higher = smoother).", math.floor(CFG.aimSmoothing * 100), 1, 100, "%", function(v)
+	CFG.aimSmoothing = v / 100
+end)
+sAim2:Slider("FOV Radius", "Radius of the circular targeting zone in pixels.", CFG.fovRadius, 30, 500, "px", function(v)
+	CFG.fovRadius = v
+end)
+
+-- === [2] ESP TAB ===
+local sEsp1 = tabESP:Section("General ESP", "Render real-time outlines and tracers around targets.")
+sEsp1:Toggle("Master ESP", "Turn all ESP visuals on or off.", CFG.espEnabled, function(on)
+	CFG.espEnabled = on
+end)
+sEsp1:Toggle("Team Check (Enemy Only)", "Filter out teammates in team-based game modes.", CFG.teamCheck, function(on)
+	CFG.teamCheck = on
+end)
+sEsp1:Slider("Max Render Distance", "Maximum distance to render player ESP tags.", CFG.maxDist, 20, 600, "m", function(v)
+	CFG.maxDist = v
+end)
+
+local sEsp2 = tabESP:Section("ESP Visual Elements", "Choose which visual tags to display on each player.")
+sEsp2:Toggle("2D Bounding Boxes", "Draw box boundaries around targets.", CFG.showBoxes, function(on)
+	CFG.showBoxes = on
+end)
+sEsp2:Toggle("Snaplines / Tracers", "Draw lines from screen bottom to targets.", CFG.showTracers, function(on)
+	CFG.showTracers = on
+end)
+sEsp2:Toggle("Player Names", "Display display names above player heads.", CFG.showNames, function(on)
+	CFG.showNames = on
+end)
+sEsp2:Toggle("Health Bars", "Show dynamic health bars next to targets.", CFG.showHealth, function(on)
+	CFG.showHealth = on
+end)
+sEsp2:Toggle("Distance Tags", "Show distance in meters below players.", CFG.showDistance, function(on)
+	CFG.showDistance = on
+end)
+
+-- === [3] COLORS & THEME TAB ===
+local sCol = tabColors:Section("Color Themes", "Select theme color presets.")
+sCol:Dropdown("Theme Palette", "Preset colors for ESP and UI accents.", {
+	"Crystal Cyan (Default)", "Electric Blue", "Ruby Red", "Emerald Green", "Neon Violet"
+}, 1, function(sel)
+	if sel == "Crystal Cyan (Default)" then
+		CFG.enemyColor  = Color3.fromRGB(0, 229, 255)
+		CFG.teamColor   = Color3.fromRGB(56, 189, 248)
+		CFG.tracerColor = Color3.fromRGB(0, 180, 255)
+		CFG.fovColor    = Color3.fromRGB(0, 240, 255)
+	elseif sel == "Electric Blue" then
+		CFG.enemyColor  = Color3.fromRGB(59, 130, 246)
+		CFG.teamColor   = Color3.fromRGB(96, 165, 250)
+		CFG.tracerColor = Color3.fromRGB(37, 99, 235)
+		CFG.fovColor    = Color3.fromRGB(96, 165, 250)
+	elseif sel == "Ruby Red" then
+		CFG.enemyColor  = Color3.fromRGB(255, 60, 60)
+		CFG.teamColor   = Color3.fromRGB(60, 255, 120)
+		CFG.tracerColor = Color3.fromRGB(255, 80, 80)
+		CFG.fovColor    = Color3.fromRGB(255, 100, 100)
+	elseif sel == "Emerald Green" then
+		CFG.enemyColor  = Color3.fromRGB(52, 211, 153)
+		CFG.teamColor   = Color3.fromRGB(96, 165, 250)
+		CFG.tracerColor = Color3.fromRGB(16, 185, 129)
+		CFG.fovColor    = Color3.fromRGB(52, 211, 153)
+	elseif sel == "Neon Violet" then
+		CFG.enemyColor  = Color3.fromRGB(192, 132, 252)
+		CFG.teamColor   = Color3.fromRGB(96, 165, 250)
+		CFG.tracerColor = Color3.fromRGB(168, 85, 247)
+		CFG.fovColor    = Color3.fromRGB(192, 132, 252)
+	end
+end)
+sCol:Slider("Window Opacity", "Adjust transparency of the background window.", 85, 20, 100, "%", function(v)
+	window.BackgroundTransparency = (100 - v) / 100
+end)
+
+-- === [4] SYSTEM SETTINGS TAB ===
+local sSys = tabConfig:Section("Menu Keybind & Controls", "Bind custom key for showing and hiding UI.")
+sSys:Keybind("Menu Toggle Key", "Click and press any key to set as the menu hotkey.", CFG.menuKey, function(newKey)
+	CFG.menuKey = newKey
+end)
+sSys:Button("Unload ARGON", "Remove all GUI elements and stop drawing threads.", "Unload", function()
+	if _G.ArgonCleanup then _G.ArgonCleanup() end
+end)
+
+selectTab(tabs[1])
+
+-- ========================================================
+-- DRAWINGS & CORE ENGINE
+-- ========================================================
+local drawings = {}
+local function newDraw(t, props)
+	local d = Drawing.new(t)
+	for k, v in pairs(props) do d[k] = v end
+	table.insert(drawings, d)
+	return d
+end
+
+local playerDrawings = {}
+local function getPD(name)
+	if not playerDrawings[name] then
+		playerDrawings[name] = {
+			boxTL      = newDraw("Line", {Thickness=1.5, Visible=false}),
+			boxTR      = newDraw("Line", {Thickness=1.5, Visible=false}),
+			boxBL      = newDraw("Line", {Thickness=1.5, Visible=false}),
+			boxBR      = newDraw("Line", {Thickness=1.5, Visible=false}),
+			tracer     = newDraw("Line", {Thickness=1.2, Visible=false}),
+			nameText   = newDraw("Text", {Size=13, Center=true, Outline=true, OutlineColor=Color3.new(0,0,0), Visible=false}),
+			healthBg   = newDraw("Line", {Thickness=5, Visible=false, Color=Color3.fromRGB(20,20,25)}),
+			healthFill = newDraw("Line", {Thickness=3, Visible=false}),
+			distText   = newDraw("Text", {Size=11, Center=true, Outline=true, OutlineColor=Color3.new(0,0,0), Visible=false}),
+		}
+	end
+	return playerDrawings[name]
+end
+
+local fovCircle = Drawing.new("Circle")
+fovCircle.Radius = CFG.fovRadius
+fovCircle.Color = CFG.fovColor
+fovCircle.Thickness = 1.5
+fovCircle.Filled = false
+fovCircle.Visible = true
+table.insert(drawings, fovCircle)
+
+local function isEnemy(p)
+	if not CFG.teamCheck then return true end
+	if p == lp then return false end
+	local s1 = p:FindFirstChild("Status")
+	local s2 = lp:FindFirstChild("Status")
+	if s1 and s2 then
+		local t1 = s1:FindFirstChild("Team")
+		local t2 = s2:FindFirstChild("Team")
+		if t1 and t2 and t1.Value == t2.Value then return false end
+	end
+	if p.Team and lp.Team and p.Team == lp.Team then return false end
+	if p.TeamColor and lp.TeamColor and p.TeamColor == lp.TeamColor then return false end
+	return true
+end
+
+local function isAlive(p)
+	local c = p.Character
+	if not c or c.Parent ~= workspace then return false end
+	local status = p:FindFirstChild("Status")
+	if status then
+		local alive = status:FindFirstChild("Alive")
+		if alive and alive.Value == false then return false end
+	end
+	local nrpbs = p:FindFirstChild("NRPBS")
+	if nrpbs then
+		local hp = nrpbs:FindFirstChild("Health")
+		if hp and hp.Value <= 0 then return false end
+	end
+	local h = c:FindFirstChildOfClass("Humanoid")
+	if not h or h.Health <= 0 then return false end
+	local hrp = c:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp.Position.Y < -20 then return false end
+	return true
+end
+
+local function toVP(pos3)
+	local p2, vis = Camera:WorldToViewportPoint(pos3)
+	return Vector2.new(p2.X, p2.Y), vis, p2.Z
+end
+
+local aimlockHeld = false
+local aimlockTarget = nil
+
+local function getClosest()
+	local center = Camera.ViewportSize / 2
+	local best, bestD = nil, math.huge
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= lp and isEnemy(p) and isAlive(p) then
+			local c = p.Character
+			local part = c and (c:FindFirstChild(CFG.aimPart) or c:FindFirstChild("HumanoidRootPart"))
+			if part then
+				local s2, on = toVP(part.Position)
+				if on then
+					local d = (s2 - center).Magnitude
+					if d < CFG.fovRadius and d < bestD then
+						bestD = d
+						best = p
+					end
+				end
+			end
+		end
+	end
+	return best
+end
+
+local function isAimKey(inp)
+	if not CFG.aimlockKey then return false end
+	if CFG.aimlockKey.EnumType == Enum.KeyCode then
+		return inp.KeyCode == CFG.aimlockKey
+	elseif CFG.aimlockKey.EnumType == Enum.UserInputType then
+		return inp.UserInputType == CFG.aimlockKey
+	end
+	return false
+end
+
+local inputBegan = UserInputService.InputBegan:Connect(function(inp, gpe)
+	if gpe and inp.UserInputType ~= Enum.UserInputType.MouseButton2 and inp.UserInputType ~= Enum.UserInputType.MouseButton3 and inp.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+	if isAimKey(inp) then
+		aimlockHeld = true
+		aimlockTarget = getClosest()
+	end
+end)
+
+local inputEnded = UserInputService.InputEnded:Connect(function(inp)
+	if isAimKey(inp) then 
+		aimlockHeld = false
+		aimlockTarget = nil 
+	end
+end)
+
+local renderConn = RunService.RenderStepped:Connect(function()
+	local ss = Camera.ViewportSize
+	local sc = ss / 2
+	fovCircle.Position = sc
+	fovCircle.Radius = CFG.fovRadius
+	fovCircle.Color = CFG.fovColor
+	fovCircle.Visible = CFG.showFOV and CFG.aimlockEnabled
+
+	if aimlockHeld and aimlockTarget then
+		if not isAlive(aimlockTarget) or not isEnemy(aimlockTarget) then
+			aimlockTarget = getClosest()
+		end
+	end
+
+	if aimlockHeld and aimlockTarget and CFG.aimlockEnabled then
+		local c = aimlockTarget.Character
+		local part = c and (c:FindFirstChild(CFG.aimPart) or c:FindFirstChild("HumanoidRootPart"))
+		if part then
+			Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, part.Position), CFG.aimSmoothing)
+		end
+	end
+
+	local seen = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p == lp then continue end
+		local c = p.Character
+		local d = getPD(p.Name)
+		seen[p.Name] = true
+		
+		if not CFG.espEnabled or not c or not isAlive(p) or not isEnemy(p) then
+			for _, dr in pairs(d) do dr.Visible = false end
+			continue
+		end
+		
+		local hum = c:FindFirstChildOfClass("Humanoid")
+		local hrp = c:FindFirstChild("HumanoidRootPart")
+		local head = c:FindFirstChild("Head")
+		if not hrp or not head then for _, dr in pairs(d) do dr.Visible = false end continue end
+		
+		local rootPos, onScreen, depth = toVP(hrp.Position)
+		if not onScreen or depth <= 0 then for _, dr in pairs(d) do dr.Visible = false end continue end
+		
+		local dist = (hrp.Position - Camera.CFrame.Position).Magnitude
+		if dist > CFG.maxDist then for _, dr in pairs(d) do dr.Visible = false end continue end
+		
+		local col = CFG.enemyColor
+		local headPos2 = toVP(head.Position + Vector3.new(0, 0.7, 0))
+		local feetPos2 = toVP(hrp.Position - Vector3.new(0, 2.8, 0))
+		local boxH = math.abs(headPos2.Y - feetPos2.Y)
+		local boxW = boxH * 0.55
+		local cx = rootPos.X
+		local top = math.min(headPos2.Y, feetPos2.Y)
+		local bot = math.max(headPos2.Y, feetPos2.Y)
+		local left = cx - boxW/2
+		local right = cx + boxW/2
+		
+		if CFG.showBoxes then
+			d.boxTL.From=Vector2.new(left,top)  d.boxTL.To=Vector2.new(right,top) d.boxTL.Color=col d.boxTL.Visible=true
+			d.boxTR.From=Vector2.new(left,bot)  d.boxTR.To=Vector2.new(right,bot) d.boxTR.Color=col d.boxTR.Visible=true
+			d.boxBL.From=Vector2.new(left,top)  d.boxBL.To=Vector2.new(left,bot)  d.boxBL.Color=col d.boxBL.Visible=true
+			d.boxBR.From=Vector2.new(right,top) d.boxBR.To=Vector2.new(right,bot) d.boxBR.Color=col d.boxBR.Visible=true
+		else
+			d.boxTL.Visible=false d.boxTR.Visible=false d.boxBL.Visible=false d.boxBR.Visible=false
+		end
+		
+		if CFG.showTracers then
+			d.tracer.From = Vector2.new(sc.X, ss.Y)
+			d.tracer.To = rootPos
+			d.tracer.Color = CFG.tracerColor
+			d.tracer.Visible = true
+		else
+			d.tracer.Visible = false
+		end
+		
+		if CFG.showNames then
+			local dn = p.DisplayName
+			if p.DisplayName ~= p.Name then dn = p.DisplayName.." (@"..p.Name..")" end
+			d.nameText.Text = dn
+			d.nameText.Position = Vector2.new(cx, top - 16)
+			d.nameText.Color = Color3.fromRGB(240, 249, 255)
+			d.nameText.Visible = true
+		else
+			d.nameText.Visible = false
+		end
+		
+		if CFG.showHealth and hum then
+			local hp = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+			local bl = left - 6
+			d.healthBg.From = Vector2.new(bl, top)
+			d.healthBg.To = Vector2.new(bl, bot)
+			d.healthBg.Visible = true
+			
+			d.healthFill.From = Vector2.new(bl, bot)
+			d.healthFill.To = Vector2.new(bl, bot - boxH * hp)
+			d.healthFill.Color = Color3.fromHSV(hp * 0.33, 1, 1)
+			d.healthFill.Visible = true
+		else
+			d.healthBg.Visible = false
+			d.healthFill.Visible = false
+		end
+		
+		if CFG.showDistance then
+			d.distText.Text = string.format("[%.0fm]", dist)
+			d.distText.Position = Vector2.new(cx, bot + 3)
+			d.distText.Color = Color3.fromRGB(148, 163, 184)
+			d.distText.Visible = true
+		else
+			d.distText.Visible = false
+		end
+	end
+
+	for name in pairs(playerDrawings) do
+		if not seen[name] then
+			for _, dr in pairs(playerDrawings[name]) do dr.Visible = false end
+		end
+	end
+end)
+
+-- ===== CLEANUP HANDLER =====
+_G.ArgonCleanup = function()
+	pcall(function() renderConn:Disconnect() end)
+	pcall(function() inputBegan:Disconnect() end)
+	pcall(function() inputEnded:Disconnect() end)
+	for _, d in ipairs(drawings) do pcall(function() d:Remove() end) end
+	for _, group in pairs(playerDrawings) do
+		for _, d in pairs(group) do pcall(function() d:Remove() end) end
+	end
+	pcall(function() gui:Destroy() end)
+	print("[ARGON] Cleaned up successfully!")
+end
+
+print("[ARGON] Loaded with Custom Keybinds & Translucent Glass UI!")
